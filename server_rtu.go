@@ -10,12 +10,13 @@ import (
 )
 
 type ModbusRtuServer struct {
-	conf    *ModbusRtuServerConfig
-	handler RequestHandler
-	lock    sync.Mutex
-	port    serial.Port
-	started bool
-	logger  *logger
+	conf         *ModbusRtuServerConfig
+	handler      RequestHandler
+	lock         sync.Mutex
+	port         serial.Port
+	started      bool
+	logger       *logger
+	responseSent bool
 }
 
 type ModbusRtuServerConfig struct {
@@ -102,6 +103,14 @@ func (ms *ModbusRtuServer) Start() (err error) {
 		StopBits: int(ms.conf.StopBits),
 		Parity:   ms.conf.Parity,
 		Timeout:  minPauseDuration,
+		RS485: serial.RS485Config{
+			Enabled:            true,
+			DelayRtsBeforeSend: 0,
+			DelayRtsAfterSend:  0,
+			RtsHighDuringSend:  false, // In Kernel driver of AM62 this signal is flipped. Therefore this is "wrong" here...
+			RtsHighAfterSend:   true,  // In Kernel driver of AM62 this signal is flipped. Therefore this is "wrong" here...
+			RxDuringTx:         false,
+		},
 	}
 
 	ms.logger.Infof("Connecting %v", serialCfg)
@@ -193,6 +202,13 @@ func (ms *ModbusRtuServer) listenAndServe() {
 			continue
 		}
 
+		if ms.responseSent == true {
+			ms.logger.Infof("DISCARD Received TX ECHO bytes: %v\n", receivedData)
+			receivedData = nil
+			ms.responseSent = false
+			continue
+		}
+
 		ms.logger.Infof("Received bytes: %v\n", receivedData)
 
 		var raw any
@@ -259,6 +275,7 @@ func (ms *ModbusRtuServer) listenAndServe() {
 		if _, err = ms.port.Write(bytesToSend); err != nil {
 			ms.logger.Errorf("Send answer failed! (%v)", err)
 		}
+		ms.responseSent = true
 
 		// Request executed and answer sent. Ready to receivce next message.
 		receivedData = nil
