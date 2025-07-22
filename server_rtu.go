@@ -17,6 +17,7 @@ type ModbusRtuServer struct {
 	started      bool
 	logger       *logger
 	responseSent bool
+	shouldStop   bool
 }
 
 type ModbusRtuServerConfig struct {
@@ -128,12 +129,13 @@ func (ms *ModbusRtuServer) Start() (err error) {
 }
 
 func (ms *ModbusRtuServer) Stop() (err error) {
-	ms.lock.Lock()
-	defer ms.lock.Unlock()
-
 	if !ms.started {
 		return
 	}
+
+	ms.shouldStop = true
+	ms.lock.Lock()
+	defer ms.lock.Unlock()
 
 	err = ms.port.Close()
 	if err != nil {
@@ -142,6 +144,7 @@ func (ms *ModbusRtuServer) Stop() (err error) {
 	}
 
 	ms.logger.Infof("Closed!")
+	ms.shouldStop = false
 	ms.started = false
 	return
 }
@@ -194,6 +197,11 @@ func (ms *ModbusRtuServer) listenAndServe() {
 		if n > 0 {
 			receivedData = append(receivedData, buf...)
 			continue
+		}
+
+		// Check if rtu server stop is requested
+		if ms.shouldStop {
+			return
 		}
 
 		// Continue receiving when we have nothing received yet...
